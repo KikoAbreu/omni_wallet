@@ -32,8 +32,84 @@ class OmniWalletApp extends StatelessWidget {
 }
 
 // --- TELA DE LOGIN ---
-class LoginView extends StatelessWidget {
+class LoginView extends StatefulWidget {
   const LoginView({super.key});
+
+  @override
+  State<LoginView> createState() => _LoginViewState();
+}
+
+class _LoginViewState extends State<LoginView> {
+  // Controladores para capturar o e-mail e a senha digitados
+  final _emailController = TextEditingController();
+  final _senhaController = TextEditingController();
+
+  bool _carregando = false; // Estado para o círculo de loading no botão
+
+  // Função que valida as credenciais no Supabase
+  Future<void> _fazerLogin() async {
+    final email = _emailController.text.trim();
+    final senha = _senhaController.text.trim();
+
+    // Validação visual simples
+    if (email.isEmpty || senha.isEmpty) {
+      _mostrarMensagem("Por favor, preencha todos os campos!");
+      return;
+    }
+
+    setState(() {
+      _carregando = true;
+    });
+
+    try {
+      // Faz uma busca na tabela 'usuarios' procurando pelo email E pela senha digitados
+      final resposta = await Supabase.instance.client
+          .from('usuarios')
+          .select()
+          .eq('email', email)
+          .eq('senha', senha)
+          .maybeSingle(); // Retorna um registro ou null se não achar nada
+
+      if (resposta == null) {
+        _mostrarMensagem("E-mail ou senha incorretos!");
+      } else {
+        _mostrarMensagem("Login efetuado com sucesso!", sucesso: true);
+
+        // Aguarda um instante para o usuário ver o feedback visual
+        await Future.delayed(const Duration(milliseconds: 1000));
+
+        // TODO: Navegar para a tela Home/Dashboard do Omni Wallet aqui!
+        // Por enquanto, vamos só printar no console que deu certo
+        print("Usuário logado: ${resposta['nome']}");
+      }
+
+    } catch (erro) {
+      _mostrarMensagem("Erro ao conectar: ${erro.toString()}");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _carregando = false;
+        });
+      }
+    }
+  }
+
+  void _mostrarMensagem(String mensagem, {bool sucesso = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensagem),
+        backgroundColor: sucesso ? Colors.green[700] : Colors.red[800],
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _senhaController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -57,14 +133,19 @@ class LoginView extends StatelessWidget {
                   children: [
                     const Text("OMNI WALLET", style: TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.bold, letterSpacing: 3)),
                     const SizedBox(height: 50),
-                    _buildTextField(hint: "E-mail", icon: Icons.email),
+
+                    // Vinculando os controladores aos inputs criados
+                    _buildTextField(hint: "E-mail", icon: Icons.email, controller: _emailController),
                     const SizedBox(height: 15),
-                    _buildTextField(hint: "Senha", icon: Icons.lock, isPassword: true),
+                    _buildTextField(hint: "Senha", icon: Icons.lock, isPassword: true, controller: _senhaController),
+
                     const SizedBox(height: 30),
                     ElevatedButton(
-                      onPressed: () {},
+                      onPressed: _carregando ? null : _fazerLogin,
                       style: _buttonStyle(),
-                      child: const Text("ENTRAR"),
+                      child: _carregando
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                          : const Text("ENTRAR"),
                     ),
                     const SizedBox(height: 20),
                     TextButton(
