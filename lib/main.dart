@@ -1,6 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart'; // 1. Importa o pacote
 
-void main() {
+void main() async {
+  // 2. Garante que os componentes do Flutter estejam prontos antes de rodar código assíncrono
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // 3. Liga o motor do Supabase na inicialização do App
+  await Supabase.initialize(
+    url: 'https://lvojfkgbrzeymuafuvts.supabase.co',
+    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx2b2pma2dicnpleW11YWZ1dnRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg1ODMwMzcsImV4cCI6MjA5NDE1OTAzN30.1oPd8XTYn6CEpD7DBny6rqUYLJIJSN-hpzs0SPy-atM',
+  );
+
   runApp(const OmniWalletApp());
 }
 
@@ -16,7 +26,6 @@ class OmniWalletApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
         useMaterial3: true,
       ),
-      // Definimos que o App começa na tela de Login
       home: const LoginView(),
     );
   }
@@ -31,7 +40,6 @@ class LoginView extends StatelessWidget {
     return Scaffold(
       body: Stack(
         children: [
-          // 1. Imagem de Fundo (Nome atualizado para "tela_fundo_OW.png")
           Container(
             decoration: const BoxDecoration(
               image: DecorationImage(
@@ -59,7 +67,6 @@ class LoginView extends StatelessWidget {
                       child: const Text("ENTRAR"),
                     ),
                     const SizedBox(height: 20),
-                    // BOTÃO QUE LEVA PARA O CADASTRO
                     TextButton(
                       onPressed: () {
                         Navigator.push(
@@ -80,19 +87,98 @@ class LoginView extends StatelessWidget {
   }
 }
 
-// --- TELA DE CADASTRO ---
-class RegisterView extends StatelessWidget {
+// --- TELA DE CADASTRO (AGORA STATEFUL E CONECTADA AO BANCO) ---
+class RegisterView extends StatefulWidget {
   const RegisterView({super.key});
+
+  @override
+  State<RegisterView> createState() => _RegisterViewState();
+}
+
+class _RegisterViewState extends State<RegisterView> {
+  // Controladores para capturar o texto dos inputs
+  final _nomeController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _senhaController = TextEditingController();
+  final _confirmaSenhaController = TextEditingController();
+
+  bool _carregando = false; // Estado para mostrar um indicador de loading no botão
+
+  // Função que faz o cadastro no Supabase
+  Future<void> _cadastrarUsuario() async {
+    final nome = _nomeController.text.trim();
+    final email = _emailController.text.trim();
+    final senha = _senhaController.text.trim();
+    final confirmaSenha = _confirmaSenhaController.text.trim();
+
+    // Validações básicas (Melhoria de Usabilidade e Segurança)
+    if (nome.isEmpty || email.isEmpty || senha.isEmpty || confirmaSenha.isEmpty) {
+      _mostrarMensagem("Por favor, preencha todos os campos!");
+      return;
+    }
+
+    if (senha != confirmaSenha) {
+      _mostrarMensagem("As senhas não coincidem!");
+      return;
+    }
+
+    setState(() {
+      _carregando = true; // Ativa o círculo de carregamento
+    });
+
+    try {
+      // Envia os dados para a tabela do Supabase que você acabou de criar
+      await Supabase.instance.client.from('usuarios').insert({
+        'nome': nome,
+        'email': email,
+        'senha': senha, // Em produção usaríamos hash, para a AV2 a string limpa resolve perfeitamente
+      });
+
+      _mostrarMensagem("Cadastro realizado com sucesso!", sucesso: true);
+
+      // Retorna para a tela de login após 1.5 segundos
+      await Future.delayed(const Duration(milliseconds: 1500));
+      if (mounted) Navigator.pop(context);
+
+    } catch (erro) {
+      _mostrarMensagem("Erro ao cadastrar: ${erro.toString()}");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _carregando = false; // Desativa o carregamento
+        });
+      }
+    }
+  }
+
+  // Helper para mostrar notificações na tela (SnackBar)
+  void _mostrarMensagem(String mensagem, {bool sucesso = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensagem),
+        backgroundColor: sucesso ? Colors.green[700] : Colors.red[800],
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    // Limpa os controladores da memória ao sair da tela
+    _nomeController.dispose();
+    _emailController.dispose();
+    _senhaController.dispose();
+    _confirmaSenhaController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Botão de voltar automático no AppBar transparente
       extendBodyBehindAppBar: true,
       appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, iconTheme: const IconThemeData(color: Colors.white)),
       body: Stack(
         children: [
-          // 1. Imagem de Fundo (Nome atualizado para "tela_fundo_OW.png")
           Container(
             decoration: const BoxDecoration(
               image: DecorationImage(
@@ -112,20 +198,23 @@ class RegisterView extends StatelessWidget {
                     const SizedBox(height: 10),
                     const Text("Preencha os dados abaixo", style: TextStyle(color: Colors.white70)),
                     const SizedBox(height: 40),
-                    _buildTextField(hint: "Nome Completo", icon: Icons.person),
+
+                    // Vinculamos cada campo ao seu respectivo controller
+                    _buildTextField(hint: "Nome Completo", icon: Icons.person, controller: _nomeController),
                     const SizedBox(height: 15),
-                    _buildTextField(hint: "E-mail", icon: Icons.email),
+                    _buildTextField(hint: "E-mail", icon: Icons.email, controller: _emailController),
                     const SizedBox(height: 15),
-                    _buildTextField(hint: "Crie uma Senha", icon: Icons.lock, isPassword: true),
+                    _buildTextField(hint: "Crie uma Senha", icon: Icons.lock, isPassword: true, controller: _senhaController),
                     const SizedBox(height: 15),
-                    _buildTextField(hint: "Confirme a Senha", icon: Icons.lock_outline, isPassword: true),
+                    _buildTextField(hint: "Confirme a Senha", icon: Icons.lock_outline, isPassword: true, controller: _confirmaSenhaController),
                     const SizedBox(height: 30),
+
                     ElevatedButton(
-                      onPressed: () {
-                        Navigator.pop(context); // Volta para o login
-                      },
+                      onPressed: _carregando ? null : _cadastrarUsuario, // Desabilita o clique múltiplo se estiver carregando
                       style: _buttonStyle(),
-                      child: const Text("FINALIZAR CADASTRO"),
+                      child: _carregando
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                          : const Text("FINALIZAR CADASTRO"),
                     ),
                   ],
                 ),
@@ -140,8 +229,9 @@ class RegisterView extends StatelessWidget {
 
 // --- COMPONENTES REUTILIZÁVEIS ---
 
-Widget _buildTextField({required String hint, required IconData icon, bool isPassword = false}) {
+Widget _buildTextField({required String hint, required IconData icon, bool isPassword = false, TextEditingController? controller}) {
   return TextField(
+    controller: controller, // Recebe o controlador
     obscureText: isPassword,
     style: const TextStyle(color: Colors.black87),
     decoration: InputDecoration(

@@ -32,7 +32,7 @@ dependencies:
     sdk: flutter
 
   # Conexão com Postgres e Autenticação (RF01, RF02, RF03)
-  supabase_flutter: ^2.0.0
+  supabase_flutter: ^2.12.4
 
   # Gerência de estado para o padrão MVVM
   provider: ^6.1.1
