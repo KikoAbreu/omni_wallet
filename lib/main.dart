@@ -51,7 +51,7 @@ class _LoginViewState extends State<LoginView> {
     final email = _emailController.text.trim();
     final senha = _senhaController.text.trim();
 
-    // Validação visual simples
+    // Validação visual
     if (email.isEmpty || senha.isEmpty) {
       _mostrarMensagem("Por favor, preencha todos os campos!");
       return;
@@ -85,7 +85,10 @@ class _LoginViewState extends State<LoginView> {
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
-              builder: (context) => HomeView(userName: nomeUsuario),
+              builder: (context) => HomeView(
+                userName: resposta['nome'] ?? 'Usuário',
+                userEmail: email,
+              ),
             ),
           );
         }
@@ -346,157 +349,266 @@ ButtonStyle _buttonStyle() {
 // --- TELA PRINCIPAL: DASHBOARD DE FINANÇAS ---
 class HomeView extends StatefulWidget {
   final String userName;
+  final String userEmail; // Novo campo para o e-mail
 
-  const HomeView({super.key, required this.userName});
+  const HomeView({super.key, required this.userName, required this.userEmail});
 
   @override
   State<HomeView> createState() => _HomeViewState();
 }
 
 class _HomeViewState extends State<HomeView> {
+  double saldo = 0.0;
+  double entradas = 0.0;
+  double saidas = 0.0;
+  List<dynamic> transacoes = [];
+  bool carregando = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _buscarDados();
+  }
+
+  // Busca transações do banco e calcula os totais
+  Future<void> _buscarDados() async {
+    setState(() => carregando = true);
+    try {
+      final dados = await Supabase.instance.client
+          .from('transacoes')
+          .select()
+          .eq('usuario_email', widget.userEmail)
+          .order('created_at', ascending: false);
+
+      double totalEntradas = 0;
+      double totalSaidas = 0;
+
+      for (var item in dados) {
+        double valor = (item['valor'] as num).toDouble();
+        if (item['is_entrada'] == true) {
+          totalEntradas += valor;
+        } else {
+          totalSaidas += valor;
+        }
+      }
+
+      setState(() {
+        transacoes = dados;
+        entradas = totalEntradas;
+        saidas = totalSaidas;
+        saldo = totalEntradas - totalSaidas;
+        carregando = false;
+      });
+    } catch (e) {
+      print("Erro ao buscar dados: $e");
+      setState(() => carregando = false);
+    }
+  }
+
+  // Função para abrir o formulário de nova transação
+  void _abrirFormulario() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        child: FormularioTransacao(
+          userEmail: widget.userEmail,
+          onSalvar: _buscarDados, // Atualiza a lista após salvar
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[100],
-      // Barra Superior do App
       appBar: AppBar(
         title: Text("Olá, ${widget.userName}", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         backgroundColor: Colors.teal[700],
-        elevation: 0,
         actions: [
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white),
-            onPressed: () {
-              // Desloga e volta para a tela de Login limpa
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => const LoginView()),
-              );
-            },
+            onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LoginView())),
           )
         ],
       ),
       body: Column(
         children: [
-          // 1. CARD DE SALDO (BANNER SUPERIOR TEAL)
+          // CARD DE SALDO REAL
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(20.0),
             decoration: BoxDecoration(
               color: Colors.teal[700],
-              borderRadius: const BorderRadius.only(
-                bottomLeft: Radius.circular(30),
-                bottomRight: Radius.circular(30),
-              ),
+              borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(30), bottomRight: Radius.circular(30)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text("SALDO ATUAL", style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w500)),
+                const Text("SALDO ATUAL", style: TextStyle(color: Colors.white70, fontSize: 14)),
                 const SizedBox(height: 5),
-                const Text("R\$ 2.450,00", style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+                Text("R\$ ${saldo.toStringAsFixed(2)}", style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 25),
-                // Linha de Entradas e Saídas
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    // Bloco de Receitas
-                    Row(
-                      children: [
-                        const CircleAvatar(backgroundColor: Colors.white24, child: Icon(Icons.arrow_upward, color: Colors.greenAccent)),
-                        const SizedBox(width: 8),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: const [
-                            Text("Entradas", style: TextStyle(color: Colors.white70, fontSize: 12)),
-                            Text("R\$ 3.500,00", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                      ],
-                    ),
-                    // Bloco de Despesas
-                    Row(
-                      children: [
-                        const CircleAvatar(backgroundColor: Colors.white24, child: Icon(Icons.arrow_downward, color: Colors.orangeAccent)),
-                        const SizedBox(width: 8),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: const [
-                            Text("Saídas", style: TextStyle(color: Colors.white70, fontSize: 12)),
-                            Text("R\$ 1.050,00", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                      ],
-                    ),
+                    _resumoTile("Entradas", entradas, Colors.greenAccent, Icons.arrow_upward),
+                    _resumoTile("Saídas", saidas, Colors.orangeAccent, Icons.arrow_downward),
                   ],
                 ),
               ],
             ),
           ),
-
           const SizedBox(height: 20),
-
-          // Título da Seção de Histórico
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: const [
-                Text("Últimas Transações", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
-                Text("Ver todas", style: TextStyle(color: Colors.teal, fontWeight: FontWeight.w500)),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 10),
-
-          // 2. LISTA DE TRANSAÇÕES (MOCKADAS POR ENQUANTO)
+          // LISTA DE TRANSAÇÕES REAIS
           Expanded(
-            child: ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 20.0),
-              children: [
-                _buildTransactionTile(title: "Salário", subtitle: "Recebimento mensal", value: "+ R\$ 3.500,00", isIncome: true),
-                _buildTransactionTile(title: "Supermercado", subtitle: "Alimentação", value: "- R\$ 450,00", isIncome: false),
-                _buildTransactionTile(title: "Posto de Gasolina", subtitle: "Transporte", value: "- R\$ 180,00", isIncome: false),
-                _buildTransactionTile(title: "Assinatura Streaming", subtitle: "Lazer", value: "- R\$ 420,00", isIncome: false),
-              ],
+            child: carregando
+                ? const Center(child: CircularProgressIndicator())
+                : transacoes.isEmpty
+                ? const Center(child: Text("Nenhuma transação encontrada."))
+                : RefreshIndicator(
+              onRefresh: _buscarDados,
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                itemCount: transacoes.length,
+                itemBuilder: (context, index) {
+                  final t = transacoes[index];
+                  return _buildTransactionTile(
+                    id: t['id'],
+                    title: t['titulo'],
+                    subtitle: t['descricao'] ?? "",
+                    value: "${t['is_entrada'] ? '+ ' : '- '}R\$ ${(t['valor'] as num).toDouble().toStringAsFixed(2)}",
+                    isIncome: t['is_entrada'],
+                  );
+                },
+              ),
             ),
           ),
         ],
       ),
-
-      // 3. BOTÃO DE ADICIONAR NOVA TRANSAÇÃO
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          // TODO: Abrir tela ou modal de nova transação
-        },
+        onPressed: _abrirFormulario,
         backgroundColor: Colors.teal[700],
-        child: const Icon(Icons.add, color: Colors.white, size: 28),
+        child: const Icon(Icons.add, color: Colors.white),
       ),
     );
   }
 
-  // Componente visual para cada linha de transação
-  Widget _buildTransactionTile({required String title, required String subtitle, required String value, required bool isIncome}) {
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 6.0),
-      elevation: 0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: isIncome ? Colors.green[50] : Colors.red[50],
-          child: Icon(isIncome ? Icons.attach_money : Icons.shopping_bag, color: isIncome ? Colors.green[700] : Colors.red[700]),
+  Widget _resumoTile(String label, double valor, Color cor, IconData icon) {
+    return Row(
+      children: [
+        CircleAvatar(backgroundColor: Colors.white24, child: Icon(icon, color: cor, size: 20)),
+        const SizedBox(width: 8),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            Text("R\$ ${valor.toStringAsFixed(2)}", style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
         ),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87)),
-        subtitle: Text(subtitle, style: const TextStyle(color: Colors.grey)),
-        trailing: Text(
-          value,
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 16,
-            color: isIncome ? Colors.green[700] : Colors.red[700],
+      ],
+    );
+  }
+
+  Widget _buildTransactionTile({required int id, required String title, required String subtitle, required String value, required bool isIncome}) {
+    return Dismissible(
+      key: Key(id.toString()),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        color: Colors.red,
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        child: const Icon(Icons.delete, color: Colors.white),
+      ),
+      onDismissed: (direction) async {
+        await Supabase.instance.client.from('transacoes').delete().eq('id', id);
+        _buscarDados();
+      },
+      child: Card(
+        margin: const EdgeInsets.symmetric(vertical: 6.0),
+        child: ListTile(
+          leading: CircleAvatar(
+            backgroundColor: isIncome ? Colors.green[50] : Colors.red[50],
+            child: Icon(isIncome ? Icons.attach_money : Icons.shopping_bag, color: isIncome ? Colors.green[700] : Colors.red[700]),
           ),
+          title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+          subtitle: Text(subtitle),
+          trailing: Text(value, style: TextStyle(fontWeight: FontWeight.bold, color: isIncome ? Colors.green[700] : Colors.red[700])),
         ),
+      ),
+    );
+  }
+}
+
+
+class FormularioTransacao extends StatefulWidget {
+  final String userEmail;
+  final VoidCallback onSalvar;
+
+  const FormularioTransacao({super.key, required this.userEmail, required this.onSalvar});
+
+  @override
+  State<FormularioTransacao> createState() => _FormularioTransacaoState();
+}
+
+class _FormularioTransacaoState extends State<FormularioTransacao> {
+  final _tituloController = TextEditingController();
+  final _valorController = TextEditingController();
+  final _descController = TextEditingController();
+  bool _isEntrada = true;
+  bool _salvando = false;
+
+  Future<void> _salvar() async {
+    if (_tituloController.text.isEmpty || _valorController.text.isEmpty) return;
+
+    setState(() => _salvando = true);
+    try {
+      await Supabase.instance.client.from('transacoes').insert({
+        'usuario_email': widget.userEmail,
+        'titulo': _tituloController.text,
+        'descricao': _descController.text,
+        'valor': double.parse(_valorController.text.replaceAll(',', '.')),
+        'is_entrada': _isEntrada,
+      });
+      widget.onSalvar();
+      Navigator.pop(context);
+    } catch (e) {
+      print("Erro ao salvar: $e");
+    } finally {
+      setState(() => _salvando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text("Nova Transação", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 20),
+          TextField(controller: _tituloController, decoration: const InputDecoration(labelText: "Título (ex: Salário)")),
+          TextField(controller: _descController, decoration: const InputDecoration(labelText: "Descrição (opcional)")),
+          TextField(controller: _valorController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Valor (R\$)")),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              const Text("Tipo: "),
+              ChoiceChip(label: const Text("Entrada"), selected: _isEntrada, onSelected: (val) => setState(() => _isEntrada = true)),
+              const SizedBox(width: 10),
+              ChoiceChip(label: const Text("Saída"), selected: !_isEntrada, onSelected: (val) => setState(() => _isEntrada = false)),
+            ],
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton(
+            onPressed: _salvando ? null : _salvar,
+            style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50), backgroundColor: Colors.teal),
+            child: _salvando ? const CircularProgressIndicator(color: Colors.white) : const Text("SALVAR", style: TextStyle(color: Colors.white)),
+          ),
+        ],
       ),
     );
   }
